@@ -14,6 +14,22 @@ In this lab you receive a simple `LogAnalyzer` class that decides whether a file
 
 ## ✅ Your Tasks
 
+### 📦 Step 0 — Install pytest
+
+Install the package into your Python environment:
+
+```bash
+pip install pytest
+```
+
+Verify the installation:
+
+```bash
+python -m pytest --version
+```
+> 💡 **Hint:** Its important to node that during this session you need to use **python -m pytest** instead of **pytest**.
+
+
 ### 📁 Step 1 — Create the Application Under Test
 
 Create `log_analyzer.py` with the following content. Do not modify it yet — your job is to test it, not fix it.
