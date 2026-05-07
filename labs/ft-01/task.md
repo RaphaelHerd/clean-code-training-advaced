@@ -14,15 +14,59 @@ In this lab you receive a small **Route Calculator** that parses text-based rout
 
 ---
 
-## 📦 Setup
+## ✅ Your Tasks
+
+### 🛠️ Step 0 — Install Atheris on WSL2 Ubuntu
+
+Atheris requires a Linux environment. Run this lab inside WSL2 with an Ubuntu distro.
+
+**1. Launch your Ubuntu WSL2 distro** from PowerShell or Windows Terminal:
+
+```powershell
+wsl -d Ubuntu
+```
+
+**2. Update packages and install system dependencies.**
+Atheris needs Python development headers, the full Python stdlib, and the Clang compiler (which bundles libFuzzer):
+
+```bash
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y python3-full python3-dev clang python3.12-venv
+```
+
+**3. Create a virtual environment and activate it.**
+Ubuntu 22.04+ blocks global `pip` installs (PEP 668). Use a venv instead:
+
+```bash
+python3 -m venv ~/fuzz-env
+source ~/fuzz-env/bin/activate
+```
+
+Your prompt will change to `(fuzz-env)`. All subsequent `python` and `pip` commands now target this environment.
+
+**4. Install Atheris inside the venv:**
 
 ```bash
 pip install atheris
 ```
 
----
+> **Tip:** If the install fails with a compilation error, Clang may not be picked up as the default compiler. Force it explicitly:
+> ```bash
+> CC=clang pip install atheris
+> ```
 
-## ✅ Your Tasks
+**5. Verify the installation:**
+
+```bash
+python -c "import atheris; print('Atheris OK')"
+```
+
+> **Remember:** Every time you open a new WSL2 terminal for this lab, re-activate the venv first:
+> ```bash
+> source ~/fuzz-env/bin/activate
+> ```
+
+---
 
 ### 📁 Step 1 — Create the Application Under Test
 
