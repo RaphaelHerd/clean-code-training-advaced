@@ -72,7 +72,7 @@ Run `pytest -v` and confirm all tests still pass.
 Add a teardown that prints which test just ran — useful for understanding the execution order:
 
 ```python
-    def teardown_method(self, method):
+    def teardown_method(self, method: pytest.Function):
         print(f"\n[teardown] finished: {method.__name__}")
 ```
 

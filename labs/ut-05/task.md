@@ -120,7 +120,6 @@ class MockWebService:
 import pytest
 from log_analyzer import LogAnalyzer
 
-
 class StubExtensionManager:
     def get_managed_extension_list(self) -> list[str]:
         return [".log"]
@@ -144,14 +143,14 @@ def mock_service():
 
 
 @pytest.fixture
-def analyzer(mock_service):
+def analyzer(mock_service: MockWebService):
     return LogAnalyzer(
         manager=StubExtensionManager(),
         web_service=mock_service,
     )
 
 
-def test_analyze_invalid_extension_calls_log_error(analyzer, mock_service):
+def test_analyze_invalid_extension_calls_log_error(analyzer: LogAnalyzer, mock_service: MockWebService):
     # Act
     analyzer.analyze("report.xml")
 
@@ -159,19 +158,22 @@ def test_analyze_invalid_extension_calls_log_error(analyzer, mock_service):
     assert mock_service.log_error_was_called is True
 
 
-def test_analyze_invalid_extension_sends_filename_in_message(analyzer, mock_service):
+def test_analyze_invalid_extension_sends_filename_in_message(analyzer: LogAnalyzer, mock_service: MockWebService):
     analyzer.analyze("report.xml")
 
+    if mock_service.last_error_message is None:
+        pytest.fail("Expected log_error to be called with a message, but it was not called.")
+    
     assert "report.xml" in mock_service.last_error_message
 
 
-def test_analyze_valid_extension_does_not_call_log_error(analyzer, mock_service):
+def test_analyze_valid_extension_does_not_call_log_error(analyzer: LogAnalyzer, mock_service: MockWebService):
     analyzer.analyze("system.log")
 
     assert mock_service.log_error_was_called is False
 
 
-def test_analyze_invalid_extension_calls_log_error_exactly_once(analyzer, mock_service):
+def test_analyze_invalid_extension_calls_log_error_exactly_once(analyzer: LogAnalyzer, mock_service: MockWebService):
     analyzer.analyze("report.xml")
 
     assert mock_service.call_count == 1
