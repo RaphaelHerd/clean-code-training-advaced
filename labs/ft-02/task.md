@@ -69,14 +69,14 @@ def calculate_travel_time(distance: int, speed: int) -> float:
     return distance / speed
 
 
-def find_route(origin: str, destination: str) -> list:
+def find_route(origin: str, destination: str) -> list[str]:
     """BFS shortest-hop path. Returns empty list if no route exists."""
     if origin not in LOCATIONS or destination not in LOCATIONS:
         raise ValueError(f"Unknown location: '{origin}' or '{destination}'")
     if origin == destination:
         return [origin]
 
-    visited = set()
+    visited = set[str]()
     queue   = [(origin, [origin])]
 
     while queue:

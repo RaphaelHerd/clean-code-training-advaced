@@ -62,12 +62,10 @@ CITY_NAMES = list(LOCATIONS.keys())
 
 def parse_route_request(request: str):
     parts = request.split(":")
-    if len(parts) != 3:
-        raise ValueError(f"Expected 3 colon-separated fields, got {len(parts)}")
     origin      = parts[0].strip()
-    destination = parts[1].strip()
+    destination = parts[1].strip()        # BUG: missing field validation
     try:
-        speed = int(parts[2].strip())
+        speed = int(parts[2].strip())     # BUG: missing field validation
     except ValueError:
         raise ValueError(f"Speed must be an integer, got: '{parts[2].strip()}'")
     if speed < 0:                          # BUG: should be <= 0
@@ -98,7 +96,7 @@ def find_route(origin: str, destination: str) -> list:
     queue   = [(origin, [origin])]
 
     while queue:
-        current, path = queue.pop(0)
+        current, path = queue[0]         # BUG: should remove the item with pop(0)
         if current in visited:           # BUG: visited check before destination check
             continue
         visited.add(current)
@@ -214,7 +212,7 @@ Run it:
 python harness_parse.py corpus/
 ```
 
-**What to look for:** Does it crash on any speed value that passes the `ValueError` check but still causes a problem downstream?
+**What to look for:** Does it crash with `IndexError` when the request is missing fields?
 
 ---
 
@@ -270,10 +268,10 @@ if __name__ == "__main__":
 Run it:
 
 ```bash
-python harness_find_route.py corpus/
+python harness_find_route.py -timeout=2 corpus/
 ```
 
-**What to look for:** Does the result always contain both origin and destination? Does it ever return an empty list when a path clearly exists?
+**What to look for:** Does a valid city pair ever hang until libFuzzer reports a timeout?
 
 > 💡 **Key FuzzedDataProvider methods:**
 >
@@ -331,7 +329,7 @@ def TestOneInput(data: bytes) -> None:
 
     except ValueError:
         # ValueError is raised for legitimate application errors:
-        # speed <= 0 caught by a guard, no route found, etc.
+        # negative speed caught by a guard, no route found, etc.
         # Suppress it so the fuzzer keeps running.
         pass
 
@@ -377,7 +375,8 @@ Fill in the table as a comment block at the top of `harness_pipeline.py`.
 Atheris saves crashing inputs to `crash-<hash>` files. For each crash:
 
 ```bash
-python harness_pipeline.py crash-<hash>
+python <harness-that-found-it>.py crash-<hash>
+python <harness-that-found-it>.py timeout-<hash>
 ```
 
 Document all **3 bugs** in a `# CRASHES` comment block in `harness_pipeline.py`:
@@ -387,7 +386,7 @@ Document all **3 bugs** in a `# CRASHES` comment block in `harness_pipeline.py`:
 # Harness that found it : harness_pipeline.py
 # Crashing input        : "Berlin:Frankfurt:0"
 # Exception type        : ZeroDivisionError
-# Root cause (file:line): route_calculator.py:44 — calculate_travel_time
+# Root cause (file:line): route_calculator.py — calculate_travel_time
 # Fix                   : guard if speed <= 0: raise ValueError(...)
 #
 # CRASH #2
