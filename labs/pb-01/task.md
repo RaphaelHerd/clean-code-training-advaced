@@ -69,21 +69,12 @@ Replace the body of `add` with this broken implementation:
 
 ```python
 def add(a: int, b: int) -> int:
-    return a * b   # wrong — but all your examples still pass!
+    if a == 0:
+        return 0   # wrong: add(0, b) should return b
+    return a + b
 ```
 
-Run `pytest -v` again. Do all four tests still pass? Note which ones pass and which (if any) fail.
-
-> 💡 **Observation:** `1 * 2 = 2` ≠ `3` — so at least one fails. But `5 * 0 = 0 = 5 + 0`? No, `5 + 0 = 5` ≠ `0`. The point here is that *you chose examples poorly*. Try this implementation instead:
-
-```python
-def add(a: int, b: int) -> int:
-    if b == 0:
-        return a
-    return a * b   # wrong everywhere else
-```
-
-Run the tests again. This time they all pass — your examples never tested a case where `b != 0` and `a * b != a + b`.
+Run `pytest -v` again. All four tests still pass, because none of the examples uses `0` as the first argument.
 
 > 💡 **This is the core problem with example-based testing:** you can only find bugs you thought to look for.
 
@@ -106,9 +97,8 @@ from hypothesis import given
 from hypothesis import strategies as st
 from calculator import add
 
-
 @given(st.integers(), st.integers())
-def test_add_commutativity(a, b):
+def test_add_commutativity(a: int, b: int):
     # Changing the order of arguments should not change the result
     assert add(a, b) == add(b, a)
 ```
@@ -119,9 +109,9 @@ Now introduce the buggy implementation again:
 
 ```python
 def add(a: int, b: int) -> int:
-    if b == 0:
-        return a
-    return a * b
+    if a == 0:
+        return 0
+    return a + b
 ```
 
 Run the test. Hypothesis will find a counterexample and report it. Read the output carefully:
@@ -171,13 +161,19 @@ Hypothesis does not truly pick random numbers. It uses a **database of previousl
 Add this to one test and rerun to see what Hypothesis actually generates:
 
 ```python
-from hypothesis import given, settings
+from hypothesis import Verbosity, given, settings
 from hypothesis import strategies as st
 
-@settings(max_examples=10, verbosity=2)
+@settings(max_examples=10, verbosity=Verbosity.verbose)
 @given(st.integers(min_value=-100, max_value=100), st.integers(min_value=-100, max_value=100))
 def test_add_commutativity_verbose(a, b):
     assert add(a, b) == add(b, a)
+```
+
+Run pytest with output capture disabled so the generated examples are printed:
+
+```bash
+pytest -v -s
 ```
 
 Observe: Hypothesis always tries `0`, `1`, `-1`, and extreme values before moving to arbitrary ones. These are the **boundary cases** it knows are most likely to break code.
