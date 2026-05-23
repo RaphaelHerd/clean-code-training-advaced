@@ -113,15 +113,14 @@ Hypothesis cannot generate a `Basket` out of the box. Use `@composite` to define
 ```python
 # test_basket.py (add below the imports)
 
-import pytest
-from hypothesis import given, assume
+from hypothesis import given
 from hypothesis import strategies as st
-from hypothesis.strategies import composite
+from hypothesis.strategies import composite, DrawFn
 from basket import Basket
 
 
 @composite
-def basket_strategy(draw):
+def basket_strategy(draw: DrawFn):
     """Generate a Basket containing 0–8 items with realistic names and prices."""
     item_count = draw(st.integers(min_value=0, max_value=8))
     basket = Basket()
@@ -164,7 +163,7 @@ Now write a property for each invariant. Each one is a business rule that must h
 
 ```python
 @given(basket_strategy())
-def test_total_is_never_negative(basket):
+def test_total_is_never_negative(basket: Basket):
     assert basket.total() >= 0.0
 ```
 
@@ -172,7 +171,7 @@ def test_total_is_never_negative(basket):
 
 ```python
 @given(basket_strategy(), st.floats(min_value=0.01, max_value=500.0, allow_nan=False, allow_infinity=False))
-def test_adding_item_increases_total(basket, price):
+def test_adding_item_increases_total(basket: Basket, price: float):
     price = round(price, 2)
     total_before = basket.total()
 
@@ -185,7 +184,7 @@ def test_adding_item_increases_total(basket, price):
 
 ```python
 @given(basket_strategy())
-def test_total_equals_sum_of_item_prices(basket):
+def test_total_equals_sum_of_item_prices(basket: Basket):
     from basket import Item
     expected = sum(
         round(i.price, 2)
@@ -198,7 +197,7 @@ def test_total_equals_sum_of_item_prices(basket):
 
 ```python
 @given(basket_strategy(), st.text(min_size=1))
-def test_removing_unknown_item_does_not_change_basket(basket, name):
+def test_removing_unknown_item_does_not_change_basket(basket: Basket, name: str):
     assume(name not in basket.item_names())  # only run when name is truly absent
 
     total_before = basket.total()
@@ -216,7 +215,7 @@ def test_removing_unknown_item_does_not_change_basket(basket, name):
 
 ```python
 @given(basket_strategy(), st.text(min_size=1, max_size=15), st.floats(min_value=0.01, max_value=500.0, allow_nan=False, allow_infinity=False))
-def test_add_then_remove_restores_total(basket, name, price):
+def test_add_then_remove_restores_total(basket: Basket, name: str, price: float):
     assume(name not in basket.item_names())
     price = round(price, 2)
     total_before = basket.total()
