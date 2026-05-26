@@ -130,15 +130,15 @@ class SystemClock(Clock):
 
 ---
 
-### 🔧 Step 2 — Implement `Patient.register` (TODO)
+### 🔧 Step 2 — Implement `Patient.register`
 
-Copy this skeleton into `core/domain/patients.py` and fill in the `TODO`:
+Copy this implementation into `core/domain/patients.py`:
 
 ```python
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from .exceptions import DomainError
-from .events import PatientRegistered, new_event_id
+from .events import DomainEvent, PatientRegistered, new_event_id
 
 @dataclass(frozen=True)
 class PatientId:
@@ -149,9 +149,9 @@ class Patient:
     patient_id: PatientId
     name: str
     date_of_birth: date
-    _events: list = field(default_factory=list, init=False, repr=False)
+    _events: list[DomainEvent] = field(default_factory=list, init=False, repr=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.date_of_birth >= date.today():
             raise DomainError("Date of birth must be in the past")
 
@@ -177,23 +177,23 @@ class Patient:
         # The caller is responsible for persisting it and publishing the events.
         return p
 
-    def pull_events(self) -> list:
+    def pull_events(self) -> list[DomainEvent]:
         ev, self._events = self._events, []
         return ev
 ```
 
 ---
 
-### 🔧 Step 3 — Implement the In-Memory Repository (TODO)
+### 🔧 Step 3 — Implement the In-Memory Repository
 
-Copy this skeleton into `adapters/driven/in_memory_repo.py` and fill in the two TODOs:
+Copy this implementation into `adapters/driven/in_memory_repo.py`:
 
 ```python
 from typing import Dict, Optional
 from clinicare_hex_min.core.domain.patients import Patient, PatientId
 
 class InMemoryPatientRepository:
-    def __init__(self):
+    def __init__(self) -> None:
         self._store: Dict[str, Patient] = {}
 
     def get(self, pid: PatientId) -> Optional[Patient]:
@@ -210,22 +210,27 @@ class InMemoryPatientRepository:
 
 ---
 
-### 🔧 Step 4 — Implement the Event Bus (TODO)
+### 🔧 Step 4 — Implement the Event Bus
 
-Copy this skeleton into `adapters/driven/in_memory_event_bus.py` and fill in the two TODOs:
+Copy this implementation into `adapters/driven/in_memory_event_bus.py`:
 
 ```python
-from typing import Callable, Dict, List, Type
+from typing import Callable, Dict, List, Type, TypeVar, cast
 from clinicare_hex_min.core.domain.events import DomainEvent
 
-class SimpleEventBus:
-    def __init__(self):
-        self._subs: Dict[Type[DomainEvent], List[Callable]] = {}
+TEvent = TypeVar("TEvent", bound=DomainEvent)
+EventHandler = Callable[[DomainEvent], None]
 
-    def subscribe(self, event_type: Type[DomainEvent], handler: Callable) -> None:
+class SimpleEventBus:
+    def __init__(self) -> None:
+        self._subs: Dict[Type[DomainEvent], List[EventHandler]] = {}
+
+    def subscribe(
+        self, event_type: Type[TEvent], handler: Callable[[TEvent], None]
+    ) -> None:
         # setdefault creates an empty list the first time a type is registered,
         # then appends the handler.  Multiple handlers per type are fully supported.
-        self._subs.setdefault(event_type, []).append(handler)
+        self._subs.setdefault(event_type, []).append(cast(EventHandler, handler))
 
     def publish(self, event: DomainEvent) -> None:
         # isinstance allows subclass events to match parent-type subscriptions.
@@ -240,13 +245,15 @@ class SimpleEventBus:
 
 ---
 
-### 🔧 Step 5 — Implement the Projection (TODO)
+### 🔧 Step 5 — Implement the Projection
 
-Copy this skeleton into `adapters/driven/projection.py` and fill in the TODO:
+Copy this implementation into `adapters/driven/projection.py`:
 
 ```python
 from collections import defaultdict
 from dataclasses import dataclass
+from datetime import datetime
+from typing import DefaultDict, Tuple
 from clinicare_hex_min.core.domain.events import PatientRegistered
 
 @dataclass
@@ -254,11 +261,11 @@ class MonthlyCount:
     new_patients: int = 0
 
 class MonthlyNewPatientsProjection:
-    def __init__(self):
-        self._data = defaultdict(MonthlyCount)
+    def __init__(self) -> None:
+        self._data: DefaultDict[Tuple[int, int], MonthlyCount] = defaultdict(MonthlyCount)
 
     @staticmethod
-    def _key(dt):
+    def _key(dt: datetime) -> Tuple[int, int]:
         return (dt.year, dt.month)
 
     def on_patient_registered(self, e: PatientRegistered) -> None:
@@ -274,9 +281,9 @@ class MonthlyNewPatientsProjection:
 
 ---
 
-### 🔧 Step 6 — Implement the `RegisterPatient` Use Case (TODO)
+### 🔧 Step 6 — Implement the `RegisterPatient` Use Case
 
-Copy this skeleton into `core/application/use_cases.py` and fill in the TODO:
+Copy this implementation into `core/application/use_cases.py`:
 
 ```python
 from datetime import date
@@ -287,7 +294,7 @@ from clinicare_hex_min.core.ports.events import EventPublisher
 from clinicare_hex_min.core.ports.clock import Clock
 
 class RegisterPatient:
-    def __init__(self, repo: PatientRepository, events: EventPublisher, clock: Clock):
+    def __init__(self, repo: PatientRepository, events: EventPublisher, clock: Clock) -> None:
         self.repo = repo
         self.events = events
         self.clock = clock
@@ -320,7 +327,7 @@ class RegisterPatient:
 
 ### 🚀 Step 7 — Wire the CLI Demo
 
-Copy this complete file into `adapters/driver/cli_demo.py`. It contains one final TODO:
+Copy this complete file into `adapters/driver/cli_demo.py`:
 
 ```python
 from datetime import date
@@ -331,7 +338,7 @@ from clinicare_hex_min.adapters.driven.projection import MonthlyNewPatientsProje
 from clinicare_hex_min.core.application.use_cases import RegisterPatient
 from clinicare_hex_min.core.domain.events import PatientRegistered
 
-def main():
+def main() -> None:
     repo = InMemoryPatientRepository()
     bus = SimpleEventBus()
     clock = SystemClock()
@@ -370,7 +377,7 @@ New patients this month: 2
 
 ### 🧪 Step 8 — Run the Test
 
-Copy this file into `tests/test_min.py`. It is already written — it must pass once all TODOs are complete:
+Copy this file into `tests/test_min.py`. It is already written and must pass with the completed implementation:
 
 ```python
 from datetime import date
@@ -381,7 +388,7 @@ from clinicare_hex_min.adapters.driven.projection import MonthlyNewPatientsProje
 from clinicare_hex_min.core.application.use_cases import RegisterPatient
 from clinicare_hex_min.core.domain.events import PatientRegistered
 
-def test_register_patient_increments_monthly_projection():
+def test_register_patient_increments_monthly_projection() -> None:
     repo = InMemoryPatientRepository()
     bus = SimpleEventBus()
     clock = SystemClock()
@@ -395,7 +402,7 @@ def test_register_patient_increments_monthly_projection():
     assert proj.count_for(now.year, now.month) == 1
 
 
-def test_registering_duplicate_patient_raises_domain_error():
+def test_registering_duplicate_patient_raises_domain_error() -> None:
     from clinicare_hex_min.core.domain.exceptions import DomainError
     import pytest
 
@@ -432,7 +439,7 @@ Both tests must pass.
 
 ## 📦 Deliverable
 
-1. All files from the project structure above, with every `TODO` implemented
+1. All files from the project structure above, fully implemented
 2. `tests/test_min.py` — both tests passing with `pytest -v`
 3. CLI demo printing the correct count
 

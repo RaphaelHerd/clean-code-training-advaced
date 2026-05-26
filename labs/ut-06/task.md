@@ -26,7 +26,6 @@ This scenario requires two fake objects in the same test:
 
 from typing import Protocol
 
-
 class EmailService(Protocol):
     def send_email(self, to: str, subject: str, body: str) -> None:
         ...
@@ -125,7 +124,8 @@ class MockEmailService:
 
 ```python
 import pytest
-from log_analyzer import LogAnalyzer, ADMIN_EMAIL
+from log_analyzer import ADMIN_EMAIL, LogAnalyzer
+from email_service import EmailService
 
 
 @pytest.fixture
@@ -134,7 +134,7 @@ def mock_email():
 
 
 @pytest.fixture
-def analyzer_with_failing_service(mock_email):
+def analyzer_with_failing_service(mock_email: EmailService):
     return LogAnalyzer(
         manager=StubExtensionManager(),
         web_service=StubWebServiceThatFails(),  # stub
@@ -143,7 +143,7 @@ def analyzer_with_failing_service(mock_email):
 
 
 def test_analyze_sends_email_when_web_service_fails(
-    analyzer_with_failing_service, mock_email
+    analyzer_with_failing_service: LogAnalyzer, mock_email: MockEmailService
 ):
     analyzer_with_failing_service.analyze("report.xml")
 
@@ -151,7 +151,7 @@ def test_analyze_sends_email_when_web_service_fails(
 
 
 def test_analyze_email_is_sent_to_admin(
-    analyzer_with_failing_service, mock_email
+    analyzer_with_failing_service: LogAnalyzer, mock_email: MockEmailService
 ):
     analyzer_with_failing_service.analyze("report.xml")
 
@@ -159,14 +159,17 @@ def test_analyze_email_is_sent_to_admin(
 
 
 def test_analyze_email_body_contains_error_reason(
-    analyzer_with_failing_service, mock_email
+    analyzer_with_failing_service: LogAnalyzer, mock_email: MockEmailService
 ):
     analyzer_with_failing_service.analyze("report.xml")
+    
+    if(mock_email.last_body is None):
+        pytest.fail("Expected send_email to be called with a body, but it was not called.")
 
     assert "unreachable" in mock_email.last_body.lower()
 
 
-def test_analyze_does_not_send_email_when_web_service_succeeds(mock_email):
+def test_analyze_does_not_send_email_when_web_service_succeeds(mock_email: MockEmailService):
     class StubWebServiceThatSucceeds:
         def log_error(self, message: str) -> None:
             pass  # succeeds silently
@@ -182,7 +185,7 @@ def test_analyze_does_not_send_email_when_web_service_succeeds(mock_email):
     assert mock_email.was_called is False
 
 
-def test_analyze_does_not_send_email_for_valid_file(mock_email):
+def test_analyze_does_not_send_email_for_valid_file(mock_email: MockEmailService):
     class StubWebServiceThatSucceeds:
         def log_error(self, message: str) -> None:
             pass

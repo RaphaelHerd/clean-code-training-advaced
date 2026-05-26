@@ -1,0 +1,10 @@
+# cities.dict - valid tokens for the route calculator
+"Berlin"
+"Hamburg"
+"Munich"
+"Frankfurt"
+"Stuttgart"
+":"
+"0"
+"120"
+"-1"

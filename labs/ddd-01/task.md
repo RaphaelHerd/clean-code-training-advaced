@@ -54,7 +54,9 @@ clinicare/
     └── demo.py
 tests/
 ├── test_domain_patients.py
-└── test_use_cases.py
+├── test_domain_cases.py
+├── test_use_cases.py
+└── test_reporting_privacy.py
 ```
 
 > 💡 **Tip:** Domain must never import from `application` or `infrastructure`. Application may import from `domain`. Infrastructure may import from both. Draw the allowed arrows on paper before coding.
@@ -133,7 +135,7 @@ Add a `register` class method that constructs the aggregate and appends a `Patie
 
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from .events import PatientRegistered, new_event_id
+from .events import DomainEvent, PatientRegistered, new_event_id
 from .exceptions import DomainError
 
 
@@ -150,9 +152,9 @@ class Patient:
     date_of_birth: date
     # Transient event buffer — not part of the public interface.
     # Field is excluded from __init__ and __repr__ to keep it invisible.
-    _events: list = field(default_factory=list, init=False, repr=False)
+    _events: list[DomainEvent] = field(default_factory=list, init=False, repr=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         # Invariant: a patient cannot be born in the future.
         if self.date_of_birth >= date.today():
             raise DomainError("Date of birth must be in the past")
@@ -177,7 +179,7 @@ class Patient:
         )
         return p
 
-    def pull_events(self) -> list:
+    def pull_events(self) -> list[DomainEvent]:
         # Atomic swap: copy the buffer, reset it, return the copy.
         # This guarantees no event is published twice even under concurrent calls.
         ev, self._events = self._events, []
@@ -198,7 +200,7 @@ Use a `MedicationOrder` **value object** (frozen dataclass) to represent a presc
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from .events import CaseOpened, MedicationPrescribed, new_event_id
+from .events import CaseOpened, DomainEvent, MedicationPrescribed, new_event_id
 from .exceptions import DomainError
 
 
@@ -214,8 +216,8 @@ class Case:
     case_id: str
     patient_id: str
     _is_open: bool = field(default=True, init=False)
-    _medications: list = field(default_factory=list, init=False, repr=False)
-    _events: list = field(default_factory=list, init=False, repr=False)
+    _medications: list[MedicationOrder] = field(default_factory=list, init=False, repr=False)
+    _events: list[DomainEvent] = field(default_factory=list, init=False, repr=False)
 
     @classmethod
     def open(cls, case_id: str, patient_id: str) -> "Case":
@@ -257,10 +259,10 @@ class Case:
         return self._is_open
 
     @property
-    def medications(self) -> list:
+    def medications(self) -> list[MedicationOrder]:
         return list(self._medications)  # defensive copy — callers cannot mutate internals
 
-    def pull_events(self) -> list:
+    def pull_events(self) -> list[DomainEvent]:
         ev, self._events = self._events, []
         return ev
 ```
@@ -272,23 +274,23 @@ class Case:
 Write `tests/test_domain_patients.py`. At minimum, test:
 
 ```python
-def test_patient_dob_must_be_in_past():
+def test_patient_dob_must_be_in_past() -> None:
     ...
 
-def test_register_emits_patient_registered_event():
+def test_register_emits_patient_registered_event() -> None:
     ...
 
-def test_pull_events_clears_the_buffer():
+def test_pull_events_clears_the_buffer() -> None:
     ...
 ```
 
 And `tests/test_domain_cases.py`:
 
 ```python
-def test_cannot_prescribe_to_closed_case():
+def test_cannot_prescribe_to_closed_case() -> None:
     ...
 
-def test_cannot_close_case_twice():
+def test_cannot_close_case_twice() -> None:
     ...
 ```
 
@@ -303,19 +305,31 @@ Implement `clinicare/infrastructure/event_bus.py`:
 ```python
 # clinicare/infrastructure/event_bus.py
 
+from typing import Callable, Dict, List, Set, Tuple, Type, TypeVar, cast
+
+from clinicare.domain.events import DomainEvent, MedicationPrescribed
+
+
+TEvent = TypeVar("TEvent", bound=DomainEvent)
+EventHandler = Callable[[DomainEvent], None]
+
 
 class EventBus:
-    def __init__(self):
+    def __init__(self) -> None:
         # Maps event class → list of handler callables.
         # A dict of lists is the simplest pub/sub structure possible.
-        self._handlers: dict = {}
+        self._handlers: Dict[Type[DomainEvent], List[EventHandler]] = {}
 
-    def subscribe(self, event_type, handler) -> None:
+    def subscribe(
+        self, event_type: Type[TEvent], handler: Callable[[TEvent], None]
+    ) -> None:
         # Register a handler callable for a specific event type.
         # setdefault initialises the list on the first subscription for that type.
-        self._handlers.setdefault(event_type, []).append(handler)
+        # The cast is local to the bus: callers still get precise handler types,
+        # while the internal storage can keep a heterogeneous list of handlers.
+        self._handlers.setdefault(event_type, []).append(cast(EventHandler, handler))
 
-    def publish(self, event) -> None:
+    def publish(self, event: DomainEvent) -> None:
         # Deliver the event to every handler whose subscribed type matches.
         # isinstance allows a handler subscribed to DomainEvent to receive all
         # concrete event subtypes — useful for catch-all logging handlers.
@@ -331,9 +345,11 @@ Wire a handler that raises an `Alert` (print a warning is sufficient) when the s
 # Example alert handler — register with:
 # bus.subscribe(MedicationPrescribed, duplicate_medication_alert(seen))
 
-def duplicate_medication_alert(seen: set):
+def duplicate_medication_alert(
+    seen: Set[Tuple[str, str]]
+) -> Callable[[MedicationPrescribed], None]:
     """Returns a handler that warns when the same medication appears twice."""
-    def handler(event):
+    def handler(event: MedicationPrescribed) -> None:
         key = (event.case_id, event.medication)
         if key in seen:
             print(f"ALERT: '{event.medication}' prescribed twice in case '{event.case_id}'")
@@ -357,17 +373,40 @@ Implement these four use cases:
 ```python
 # clinicare/application/use_cases.py
 
-from clinicare.domain.patients import Patient, PatientId
+from datetime import date
+from typing import Optional, Protocol, Union
+
 from clinicare.domain.cases import Case
+from clinicare.domain.events import DomainEvent
 from clinicare.domain.exceptions import DomainError
+from clinicare.domain.patients import Patient, PatientId
+
+
+class PatientRepository(Protocol):
+    # Application depends on this interface, not on a concrete in-memory store.
+    def get(self, patient_id: Union[str, PatientId]) -> Optional[Patient]: ...
+
+    def save(self, patient: Patient) -> None: ...
+
+
+class CaseRepository(Protocol):
+    # The use cases need only lookup and save operations.
+    def get(self, case_id: str) -> Optional[Case]: ...
+
+    def save(self, case: Case) -> None: ...
+
+
+class EventPublisher(Protocol):
+    # EventBus is one possible implementation of this port.
+    def publish(self, event: DomainEvent) -> None: ...
 
 
 class RegisterPatient:
-    def __init__(self, patient_repo, bus):
+    def __init__(self, patient_repo: PatientRepository, bus: EventPublisher) -> None:
         self._patient_repo = patient_repo
         self._bus = bus
 
-    def __call__(self, patient_id: str, name: str, dob):
+    def __call__(self, patient_id: str, name: str, dob: date) -> Patient:
         # Precondition: the patient must not already exist.
         if self._patient_repo.get(patient_id):
             raise DomainError(f"Patient '{patient_id}' already exists")
@@ -382,12 +421,17 @@ class RegisterPatient:
 
 
 class OpenCase:
-    def __init__(self, patient_repo, case_repo, bus):
+    def __init__(
+        self,
+        patient_repo: PatientRepository,
+        case_repo: CaseRepository,
+        bus: EventPublisher,
+    ) -> None:
         self._patient_repo = patient_repo
         self._case_repo = case_repo
         self._bus = bus
 
-    def __call__(self, case_id: str, patient_id: str):
+    def __call__(self, case_id: str, patient_id: str) -> Case:
         # Cross-aggregate check: the patient must exist before a case can be opened.
         if not self._patient_repo.get(patient_id):
             raise DomainError(f"Patient '{patient_id}' not found")
@@ -399,11 +443,11 @@ class OpenCase:
 
 
 class PrescribeMedication:
-    def __init__(self, case_repo, bus):
+    def __init__(self, case_repo: CaseRepository, bus: EventPublisher) -> None:
         self._case_repo = case_repo
         self._bus = bus
 
-    def __call__(self, case_id: str, medication: str):
+    def __call__(self, case_id: str, medication: str) -> None:
         case = self._case_repo.get(case_id)
         if not case:
             raise DomainError(f"Case '{case_id}' not found")
@@ -415,11 +459,11 @@ class PrescribeMedication:
 
 
 class CloseCase:
-    def __init__(self, case_repo, bus):
+    def __init__(self, case_repo: CaseRepository, bus: EventPublisher) -> None:
         self._case_repo = case_repo
         self._bus = bus
 
-    def __call__(self, case_id: str):
+    def __call__(self, case_id: str) -> None:
         case = self._case_repo.get(case_id)
         if not case:
             raise DomainError(f"Case '{case_id}' not found")
@@ -428,6 +472,46 @@ class CloseCase:
         self._case_repo.save(case)
         for event in case.pull_events():
             self._bus.publish(event)
+```
+
+Implement the repository adapters in `clinicare/infrastructure/repositories.py`. These are simple in-memory adapters used by the CLI and tests. The application layer depends on the repository protocols above, not on these concrete classes.
+
+```python
+# clinicare/infrastructure/repositories.py
+
+from typing import Dict, Optional, Union
+
+from clinicare.domain.cases import Case
+from clinicare.domain.patients import Patient, PatientId
+
+
+class InMemoryPatientRepository:
+    def __init__(self) -> None:
+        # Maps patient id string → Patient aggregate.
+        self._store: Dict[str, Patient] = {}
+
+    def get(self, patient_id: Union[str, PatientId]) -> Optional[Patient]:
+        # Accept either the value object or the plain string id so use cases
+        # and tests can stay concise without leaking storage details.
+        key = patient_id.value if isinstance(patient_id, PatientId) else patient_id
+        return self._store.get(key)
+
+    def save(self, patient: Patient) -> None:
+        # Overwrite acts as both insert and update for this in-memory adapter.
+        self._store[patient.patient_id.value] = patient
+
+
+class InMemoryCaseRepository:
+    def __init__(self) -> None:
+        # Maps case id string → Case aggregate.
+        self._store: Dict[str, Case] = {}
+
+    def get(self, case_id: str) -> Optional[Case]:
+        return self._store.get(case_id)
+
+    def save(self, case: Case) -> None:
+        # Overwrite acts as both insert and update for this in-memory adapter.
+        self._store[case.case_id] = case
 ```
 
 ---
@@ -439,8 +523,11 @@ Implement `clinicare/infrastructure/projections.py`. Subscribe to domain events 
 ```python
 # clinicare/infrastructure/projections.py
 
-from dataclasses import dataclass
 from collections import defaultdict
+from dataclasses import dataclass
+from typing import DefaultDict, Tuple
+
+from clinicare.domain.events import CaseOpened, DomainEvent, MedicationPrescribed, PatientRegistered
 
 
 @dataclass
@@ -452,25 +539,25 @@ class MonthlyReport:
 
 
 class ReportingProjection:
-    def __init__(self):
+    def __init__(self) -> None:
         # (year, month) → MonthlyReport.
         # defaultdict auto-creates a zeroed report for any month on first access,
         # so get_report() never raises KeyError for months with no activity.
-        self._reports: dict = defaultdict(MonthlyReport)
+        self._reports: DefaultDict[Tuple[int, int], MonthlyReport] = defaultdict(MonthlyReport)
 
-    def _key(self, event) -> tuple:
+    def _key(self, event: DomainEvent) -> Tuple[int, int]:
         # Extract the (year, month) key from the event timestamp.
         return (event.occurred_at.year, event.occurred_at.month)
 
-    def on_patient_registered(self, event) -> None:
+    def on_patient_registered(self, event: PatientRegistered) -> None:
         # Increment the counter for the month the event occurred.
         # We use only event.occurred_at — patient name is never stored here.
         self._reports[self._key(event)].new_patients += 1
 
-    def on_case_opened(self, event) -> None:
+    def on_case_opened(self, event: CaseOpened) -> None:
         self._reports[self._key(event)].cases_opened += 1
 
-    def on_medication_prescribed(self, event) -> None:
+    def on_medication_prescribed(self, event: MedicationPrescribed) -> None:
         self._reports[self._key(event)].meds_prescribed += 1
 
     def get_report(self, year: int, month: int) -> MonthlyReport:

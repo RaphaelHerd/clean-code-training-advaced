@@ -68,7 +68,7 @@ class ValidationResult:
 
 class PasswordValidator:
     def validate(self, password: str) -> ValidationResult:
-        errors = []
+        errors = list[str]()
         if len(password) < 8:
             errors.append("Password must be at least 8 characters")
         return ValidationResult(is_valid=len(errors) == 0, errors=errors)

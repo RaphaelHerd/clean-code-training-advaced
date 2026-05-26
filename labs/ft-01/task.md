@@ -52,7 +52,7 @@ pip install atheris
 
 > **Tip:** If the install fails with a compilation error, Clang may not be picked up as the default compiler. Force it explicitly:
 > ```bash
-> CC=clang pip install atheris
+> CC=clang CXX=clang++ python3 -m pip install atheris
 > ```
 
 **5. Verify the installation:**
@@ -153,6 +153,7 @@ Run the application manually to understand what it does before fuzzing it:
 
 ```python
 from route_calculator import get_route_summary
+
 print(get_route_summary("Berlin:Munich:120"))
 print(get_route_summary("Hamburg:Frankfurt:90"))
 ```
@@ -163,14 +164,46 @@ Note: what happens with an unknown city? A zero speed? A missing segment?
 
 ### 🧪 Step 3 — Write the Fuzz Harness
 
-Create `fuzz_harness.py`. Atheris calls your `TestOneInput` function repeatedly with random mutated byte sequences. Decode the bytes and pass the result to `get_route_summary`.
+Create `fuzz_harness.py`. The harness decodes fuzz bytes, calls the application, and records each distinct failure in `fuzz_findings.log`.
 
 ```python
 # fuzz_harness.py
 
 import atheris
+import base64
 import sys
+import traceback
 from route_calculator import get_route_summary
+
+
+SEEN_FAILURES = set()
+FINDINGS_LOG = "fuzz_findings.log"
+
+
+def record_failure(data: bytes, text: str, exc: Exception) -> None:
+    """Record each distinct application crash once, then let fuzzing continue."""
+    traceback_entry = traceback.extract_tb(exc.__traceback__)[-1]
+    failure_key = (
+        type(exc).__name__,
+        traceback_entry.filename,
+        traceback_entry.lineno,
+    )
+
+    if failure_key in SEEN_FAILURES:
+        return
+
+    SEEN_FAILURES.add(failure_key)
+    finding = (
+        "\n"
+        f"Exception type : {type(exc).__name__}\n"
+        f"Location       : {traceback_entry.filename}:{traceback_entry.lineno}\n"
+        f"Input repr     : {text!r}\n"
+        f"Input base64   : {base64.b64encode(data).decode('ascii')}\n"
+    )
+
+    print(finding, flush=True)
+    with open(FINDINGS_LOG, "a", encoding="utf-8") as log_file:
+        log_file.write(finding)
 
 
 def TestOneInput(data: bytes) -> None:
@@ -196,9 +229,8 @@ def TestOneInput(data: bytes) -> None:
         # valid error-handling paths without stopping.
         pass
 
-    # Any other exception — IndexError, KeyError, ZeroDivisionError — is an
-    # unhandled bug.  By NOT catching it, we let it propagate back to Atheris,
-    # which records the exact bytes that triggered it as a crash artifact.
+    except Exception as exc:
+        record_failure(data, text, exc)
 
 
 if __name__ == "__main__":
@@ -206,44 +238,51 @@ if __name__ == "__main__":
     atheris.Fuzz()
 ```
 
-> 💡 **Tip:** Use `data.decode("utf-8", errors="replace")` to handle invalid byte sequences safely. A `ValueError` from `find_route` is expected application behaviour — suppress it. Any other exception (`IndexError`, `KeyError`, `ZeroDivisionError`) is a bug — do not catch it.
+> 💡 **Tip:** Use `data.decode("utf-8", errors="replace")` to handle invalid byte sequences safely. A `ValueError` from `find_route` is expected application behaviour — suppress it. Any other exception (`IndexError`, `KeyError`, `ZeroDivisionError`) is a bug.
 
 ---
 
 ### ▶️ Step 4 — Run the Fuzzer
 
+Start with an empty findings log:
+
 ```bash
+rm -f fuzz_findings.log
 python fuzz_harness.py
 ```
 
-Let it run for **at least 2–3 minutes**. Atheris prints a status line as it works:
+Let it run for **2-3 minutes**, then stop it with `Ctrl+C`.
 
-```
-#0      READ units: 1
-#1      INITED cov: 12 ft: 12 corp: 1/1b exec/s: 0 rss: 40Mb
-#64     NEW    cov: 17 ...
+Read the findings:
+
+```bash
+cat fuzz_findings.log
 ```
 
-When it finds a crash it stops and saves the input:
-
-```
-SUMMARY: libFuzzer: deadly signal
-artifact_prefix='./'; Test unit written to ./crash-<hash>
-```
+Each finding includes the exception type, source location, decoded input, and exact input bytes as base64.
 
 ---
 
-### 🔬 Step 5 — Reproduce and Identify Each Crash
+### 🔬 Step 5 — Reproduce and Analyze Findings
 
-Atheris saves each crashing input to a file named `crash-<hash>`. Reproduce it manually:
+Reproduce a finding from its `Input base64` value:
 
 ```python
-crash_input = open("crash-<hash>", "rb").read()
+import base64
 from route_calculator import get_route_summary
-get_route_summary(crash_input.decode("utf-8", errors="replace"))
+
+data = base64.b64decode("Ogo=")  # replace with a value from fuzz_findings.log
+text = data.decode("utf-8", errors="replace")
+get_route_summary(text)
 ```
 
-For **each crash** you find, document it in a comment block in `fuzz_harness.py`:
+For an empty base64 value:
+
+```python
+data = base64.b64decode("")
+```
+
+Document at least **3 distinct findings** in `fuzz_harness.py`:
 
 ```python
 # CRASH #1
@@ -252,9 +291,6 @@ For **each crash** you find, document it in a comment block in `fuzz_harness.py`
 # Root cause (line)    : ...
 # Fix idea             : ...
 ```
-
-The fuzzer should surface **at least 3 distinct crash categories**. Try to find all of them before looking at the code.
-
 ---
 
 ### 🌱 Step 6 — Warm the Fuzzer with a Corpus (Optional Bonus)
@@ -268,10 +304,12 @@ echo -n "Hamburg:Frankfurt:90" > corpus/seed2
 echo -n "Stuttgart:Berlin:100" > corpus/seed3
 ```
 
-Run with the corpus:
+Run again:
 
 ```bash
+rm -f fuzz_findings.log
 python fuzz_harness.py corpus/
+cat fuzz_findings.log
 ```
 
 Observe how much faster Atheris reaches deep code paths compared to running without seeds.
@@ -291,9 +329,10 @@ Answer the following questions in a `# REFLECTION` section at the bottom of `fuz
 
 ## 📦 Deliverable
 
-1. `route_calculator.py` — the application under test, unmodified
-2. `fuzz_harness.py` — completed `TestOneInput`, crash documentation blocks for at least 3 crashes, and the reflection section
-3. (Optional) `corpus/` folder with seed files
+1. `route_calculator.py` - application under test, unchanged
+2. `fuzz_harness.py` - harness, crash notes, and reflection
+3. `fuzz_findings.log` - generated fuzz findings
+4. `corpus/` - seed inputs
 
 ---
 

@@ -1,0 +1,6 @@
+from typing import Optional, Protocol
+from clinicare_hex_min.core.domain.patients import Patient, PatientId
+
+class PatientRepository(Protocol):
+    def get(self, pid: PatientId) -> Optional[Patient]: ...
+    def save(self, patient: Patient) -> None: ...

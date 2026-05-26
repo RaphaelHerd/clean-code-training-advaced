@@ -30,7 +30,6 @@ With a plain `MagicMock`, a misspelled method name silently succeeds:
 from unittest.mock import MagicMock
 from web_service import WebService
 
-
 def test_nonstrict_mock_hides_typo():
     mock = MagicMock()
 
@@ -52,14 +51,13 @@ Run this test and observe that it passes — the typo is invisible. This is the 
 Pass `spec=WebService` (or `spec=RealWebService`) when creating the mock. Now only methods that actually exist on `WebService` are accessible:
 
 ```python
+import pytest
 from unittest.mock import MagicMock
 from web_service import WebService
-
 
 def test_strict_mock_rejects_typo():
     mock = MagicMock(spec=WebService)
 
-    import pytest
     with pytest.raises(AttributeError):
         mock.log_errror("oops")   # raises — method does not exist on WebService
 ```
@@ -97,6 +95,7 @@ Run `pytest -v`. All tests must still pass — strict mocks do not restrict *val
 `create_autospec` is stricter than `spec=` — it also validates the **arguments** of each call against the real method's signature:
 
 ```python
+import pytest
 from unittest.mock import create_autospec
 from web_service import WebService
 
@@ -104,7 +103,6 @@ from web_service import WebService
 def test_autospec_validates_argument_count():
     mock = create_autospec(WebService)
 
-    import pytest
     with pytest.raises(TypeError):
         mock.log_error("first", "unexpected_second_arg")  # too many arguments
 ```
